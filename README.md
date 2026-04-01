@@ -1,201 +1,127 @@
-# OpenVPN multi-provider authentication plugin
+# OpenVPN multi-provider authentication plugin (C++ rewrite)
 
-The plugin allows administrators to implement multifactor authentication (via push or TOTP) for OpenVPN users. 
+## DEV WARNING
 
-Avoids insecure sending plaintext username/password when using RADIUS.
+This repository contains a DEV C++ rewrite. It is not production-ready yet.
+Using it in production is NOT recommended at this time.
 
-When using the RADIUS server, assigning specific IP addresses to OpenVPN users is possible.
+## Overview
 
-Can use multiple authentication servers for fault tolerance
+The project provides a native OpenVPN authentication plugin and a companion authentication service.
+Supported auth providers:
 
-Can handle more authentication requests per second than solutions with external authentication scripts.
+- RADIUS (PAP, MSCHAPv2)
+- LDAP/LDAPS
 
-## Features
+Key features:
 
-- supports non-blocking OpenVPN plugin API;
-- authentication protocols: LDAP/LDAPS, RADIUS;
-- adds any multifactor authentication options (via push on a mobile phone or via TOTP) for OpenVPN clients using third-party plugins, extensions for RADIUS/LDAP servers and MFA providers (check the documentation for Octa MFA, Azure MFA, Multifactor etc.);
-- can use multiple authentication servers for fault tolerance;
-- authentication service status for monitoring.
-
-### RADIUS authentication features
-
-- supported RADIUS authentication: pap, mschapv2;
-- send the IP address of OpenVPN client to RADIUS server in `Calling-Station-ID` field (can be used for detecting anomalies in SIEM software or setting additional IP adress based restrictions);
-- can use fields `Framed-IP-Address`, `Framed-IP-Netmask` from RADIUS server response to assign IP-address for OpenVPN user.
+- non-blocking OpenVPN plugin API
+- multi-provider authentication (RADIUS/LDAP)
+- optional MFA via external providers integrated into LDAP/RADIUS
+- multiple auth servers and health checks
+- monitoring endpoint for auth-service
 
 ## Architecture
 
-The plugin consists of the OpenVPN plugin and authentication service. There are two possible options:
+Two components:
 
-1. OpenVPN plugin and authentication service are installed on the same server.
+1. OpenVPN plugin (`libopenvpn_auth_plugin.so`)
+2. Auth service (`auth-service`)
 
-   ![](doc/option1.png)
+They can run on the same server or on separate servers (HTTPS recommended in that case).
 
-2. OpenVPN plugin and authentication service are installed on separate servers. In this case, using HTTPS is highly recommended. 
+## Build (CMake)
 
-   ![](doc/option2.png)
+Required system packages (Linux):
 
-## Installation
+- `cmake`, `g++`, `make`
+- `libssl-dev` (OpenSSL)
+- `libldap2-dev` (OpenLDAP)
+- `pkg-config`
+- OpenVPN plugin headers (`openvpn-plugin.h`, usually from `openvpn-dev`)
 
-### Binary
-
-Linux only build available in "Releases".
-
-### From source
-
-1. Install rust, golang from official repositories or websites.
-2. Install Task from https://taskfile.dev/
-3. Run
+Build steps:
 
 ```
-git clone https://github.com/osenchenko/openvpn-multi-authentication-plugin
-cd openvpn-multi-authentication-plugin
-task build-all
+mkdir -p build
+cd build
+cmake ..
+cmake --build .
 ```
 
-There will be all necessary files in directory `dist`
+Outputs:
+
+- `build/libopenvpn_auth_plugin.so`
+- `build/auth-service`
+- `build/radius-client`
 
 ## Configuration
 
-### Configuring authentication service
+The C++ code uses YAML config files compatible with the original layout.
 
-Check `dist/auth-service/config.yml`
+### Auth service config
 
-Run authentication service.
+Use `auth-service/config.yml` as a template and place your final config, for example:
 
-### Configuring OpenVPN plugin
+- `/etc/openvpn-multi-auth/auth-service.yml`
 
-Check `dist/openvpn-plugin/config.yml`
+Run:
 
-### Configuring OpenVPN
+```
+/usr/local/bin/auth-service --config /etc/openvpn-multi-auth/auth-service.yml
+```
 
-For using plugin and authentication via username and password, add the following settings in the OpenVPN configuration file:
+### OpenVPN plugin config
+
+Use `openvpn-plugin/config.yml` as a template and place your final config, for example:
+
+- `/etc/openvpn-multi-auth/openvpn-plugin.yml`
+
+OpenVPN config snippet:
 
 ```
 username-as-common-name
 client-config-dir <path>
-plugin <full-path-to-plugin>/libopenvpn_auth_plugin.so --config <full-path-to-config-file>
+plugin <full-path-to-plugin>/libopenvpn_auth_plugin.so --config /etc/openvpn-multi-auth/openvpn-plugin.yml
 ```
-
-Run OpenVPN. 
-
-Check logs for errors.
 
 ## Testing authentication
 
-For RADIUS authentication, the simple RADIUS client allows setting different options and understanding if authentication is successful. 
-
-For more complex testing configure and run auth-service. Execute:  
+Auth-service API call example:
 
 ```
 curl -H "X-Api-Key: 123456789" -X POST --data '{"u": "user", "p": "user_password", "client_ip": "127.0.0.1"}' -i http://127.0.0.1:11245/auth
 ```
 
-where: 
+Where `X-Api-Key` must match `web_server.auth_api_key` in the auth-service config.
 
-- `X-Api-Key` is equal to `auth_api_key` from `dist/auth-service/config.yml`
-- `ip` and `port` in url must be equal to `web_server` variables in `dist/auth-service/config.yml`
+## Monitoring
 
-## Fault tolerance authentication
-
-The authentication service can periodically try to authenticate chosen user on all available authentication servers.
-
-If any of the servers didn't authenticate the user, then this server is considered unavailable and is not used for authentication until the next authentication check.
-
-OpenVPN plugin can check the status of authentication services. If the authentication service is not responding, it is considered unavailable and is not used for authentication until the next monitoring check.
-
-## Monitoring authentication service
-
-One can monitor the authentication services by periodically checking the status URL.
-
-To test the monitoring response, run the command.
+If enabled in the auth-service config, a status endpoint is available.
+Example:
 
 ```
-curl -v -H "X-Api-Key: 1234589" http://127.0.0.1:11245/status/123455
+curl -v -H "X-Api-Key: 987654321" http://127.0.0.1:11245/status/121233456
 ```
 
-where: 
-
-- `X-Api-Key` is equal to `api_key` in `status` section from `dist/auth-service/config.yml`
-- `ip` and `port` in url must be equal to `web_server` variables from `dist/auth-service/config.yml`
-- path in url must be equal to `path` in `status` section from `dist/auth-service/config.yml`
-
-### Monitoring response format
+Response format:
 
 ```json
 {
-"status_id": "{number}",
-"status_text": "{string}",
-"msg": "{string, optional}"
+  "status_id": 1,
+  "status_text": "ok",
+  "msg": ""
 }
 ```
 
-<table>
-<tr>
-<th>
-Status
-</th>
-<th>
-Response
-</th>
-<th>
-Description
-</th>
-</tr>
-<tr>
-<td>
-OK
-</td>
-<td>
-<pre>
-json
-{
-	"status_id": 1,
-	"status_text": "ok",
-}
-</pre>
-</td>
-<td>
-All authentication servers are available
-</td>
-</tr>
-<tr>
-<td>
-Warning
-</td>
-<td>
-<pre>
-json
-{
-	"status_id": 2,
-	"status_text": "warn",
-	"msg": ""
-}
-</pre>
-</td>
-<td>
-Some of the authentication servers are available.
-</td>
-</tr>
-<tr>
-<td>
-Error
-</td>
-<td>
-<pre>
-json
-{
-	"status_id": 3,
-	"status_text": "err",
-	"msg": ""
-}
-</pre>
-</td>
-<td>
-None of the authentication servers are available.
-</td>
-</tr>
-</table>
+## systemd unit (auth-service)
 
+A sample unit is included at `systemd/openvpn-multi-auth.service`.
 
+Default paths in the unit:
+
+- Binary: `/usr/local/bin/auth-service`
+- Config: `/etc/openvpn-multi-auth/auth-service.yml`
+- User/Group: `openvpn`
+
+Adjust these paths as needed for your deployment.

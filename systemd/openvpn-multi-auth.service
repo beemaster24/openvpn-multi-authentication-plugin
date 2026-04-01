@@ -1,0 +1,21 @@
+[Unit]
+Description=OpenVPN Multi-Auth Service (C++)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/auth-service --config /etc/openvpn-multi-auth/auth-service.yml
+Restart=on-failure
+RestartSec=5
+User=openvpn
+Group=openvpn
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

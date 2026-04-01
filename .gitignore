@@ -1,1 +1,29 @@
-dist
+# Build artifacts
+/build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Runtime
+*.so
+*.a
+*.o
+*.obj
+*.dll
+*.exe
+
+# FetchContent deps
+/_deps/
